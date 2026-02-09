@@ -41,3 +41,10 @@ app-example
 # generated native folders
 /ios
 /android
+
+
+.env
+
+ignore_stuff.txt
+
+FirebaseConfig.ts
