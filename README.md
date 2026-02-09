@@ -215,18 +215,6 @@ Refer to [Expo Build Documentation](https://docs.expo.dev/build/introduction/) f
 - [Firebase Documentation](https://firebase.google.com/docs)
 - [Google Generative AI Documentation](https://ai.google.dev/)
 
-## License
-
-[Add your license information here]
-
 ## Support
 
 For issues, feature requests, or questions, please create an issue in the repository or contact the development team.
-
-## Future Enhancements
-
-- AI-powered skin type classification
-- Personalized skincare product recommendations
-- Integration with health tracking apps
-- Dermatologist consultation features
-- Community features for sharing experiences and tips
