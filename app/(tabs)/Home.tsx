@@ -619,7 +619,7 @@ return (
         </View>
 
         {/* Routine Card */}
-        <TouchableOpacity style={styles.card} onPress={() => router.push("/DailyRoutineScreen")}>
+        <TouchableOpacity style={styles.card} onPress={() => router.push("/DailyRoutine")}>
           <View style={styles.cardHeader}>
             <Clock size={20} color="#15803D" />
             <Text style={[styles.cardTitle, { color: '#15803D' }]}>Daily Routine</Text>
