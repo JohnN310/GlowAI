@@ -1,35 +1,46 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { doc, onSnapshot } from 'firebase/firestore';
 import {
-    Activity,
-    Calendar,
-    CheckCircle2,
-    ChevronLeft,
-    Filter,
-    Sparkles,
-    XCircle,
-    Zap
+  Activity,
+  Calendar,
+  CheckCircle2,
+  ChevronLeft,
+  Filter,
+  Sparkles,
+  XCircle,
+  Zap
 } from 'lucide-react-native';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-    Dimensions,
-    Modal,
-    SafeAreaView,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View
+  ActivityIndicator,
+  Dimensions,
+  Modal,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 import Animated, {
-    FadeInDown,
-    ZoomIn,
-    ZoomOut
+  FadeInDown,
+  ZoomIn,
+  ZoomOut
 } from 'react-native-reanimated';
 
-// Import the specific types from your ThemeContext
+import { auth, db } from '../FirebaseConfig';
 import { ThemeColors, useTheme } from '../app/theme/ThemeContext';
+
+interface DbRoutineEntry {
+  am?: string[];
+  pm?: string[];
+}
+
+interface DbStructure {
+  [date: string]: DbRoutineEntry;
+}
 
 type TimeRange = '7days' | '30days' | '90days';
 type RoutineStatus = 'completed' | 'partial' | 'skipped' | 'nodata';
@@ -47,12 +58,18 @@ const GRID_PADDING = 20;
 const CELL_GAP = 8;
 const CELL_SIZE = (SCREEN_WIDTH - (GRID_PADDING * 2) - (CELL_GAP * 6)) / 7;
 
-// Define status colors locally since they aren't in ThemeContext
 const STATUS_COLORS = {
-  success: '#10B981', // Emerald 500
-  warning: '#F59E0B', // Amber 500
-  danger: '#EF4444',  // Red 500
-  nodata: '#9CA3AF',  // Gray 400
+  success: '#10B981',
+  warning: '#F59E0B',
+  danger: '#EF4444',  
+  nodata: '#9CA3AF', 
+};
+
+const getLocalDateString = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
 export default function DailyRoutineHistory() {
@@ -65,47 +82,68 @@ export default function DailyRoutineHistory() {
   const [selectedRange, setSelectedRange] = useState<TimeRange>('30days');
   const [selectedFilter, setSelectedFilter] = useState<FilterType>('all');
   const [selectedDay, setSelectedDay] = useState<DayData | null>(null);
+  
+  const [dbData, setDbData] = useState<DbStructure>({});
+  const [isLoading, setIsLoading] = useState(true);
 
-  const generateMockData = (): DayData[] => {
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+
+    const userDocRef = doc(db, 'users', user.uid);
+
+    const unsubscribe = onSnapshot(userDocRef, (docSnapshot) => {
+      if (docSnapshot.exists()) {
+        const userData = docSnapshot.data();
+
+        const routineMap = userData.checkedRoutine || {};
+        
+        console.log("Fetched Routine Data Keys:", Object.keys(routineMap)); 
+        setDbData(routineMap as DbStructure);
+      } else {
+        console.log("User document does not exist");
+      }
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Error fetching routine history:", error);
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const processDatabaseData = (range: TimeRange): DayData[] => {
+    const daysCount = range === '90days' ? 90 : range === '30days' ? 30 : 7;
     const data: DayData[] = [];
-    const today = new Date('2026-02-16');
-    const aiNotes = [
-      "Routine skipped before breakout detected the next day.",
-      "Consistent routine correlated with clear skin.",
-      "Partial routine completion - breakout risk increased.",
-      undefined, undefined, undefined,
-    ];
     
-    for (let i = 89; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      const dateStr = date.toISOString().split('T')[0];
+    const today = new Date(); 
+    
+    for (let i = daysCount - 1; i >= 0; i--) {
+      const dateObj = new Date(today);
+      dateObj.setDate(dateObj.getDate() - i);
       
-      const morning = i > 60 ? Math.random() > 0.3 : Math.random() > 0.6;
-      const night = i > 60 ? Math.random() > 0.4 : Math.random() > 0.5;
-      const hasAiNote = (morning || night) && Math.random() > 0.7;
+      const dateKey = getLocalDateString(dateObj);
       
+      const entry = dbData[dateKey];
+      
+      const morningDone = !!(entry?.am && Array.isArray(entry.am) && entry.am.length > 0);
+      const nightDone = !!(entry?.pm && Array.isArray(entry.pm) && entry.pm.length > 0);
+
       data.push({
-        date: dateStr,
-        morning,
-        night,
-        aiNote: hasAiNote ? aiNotes[Math.floor(Math.random() * aiNotes.length)] : undefined,
+        date: dateKey,
+        morning: morningDone,
+        night: nightDone,
+        aiNote: undefined, 
       });
     }
+    
     return data;
   };
 
-  const allData = useMemo(() => generateMockData(), []);
-  
-  const getDaysCount = (range: TimeRange) => {
-    switch (range) {
-      case '7days': return 7;
-      case '30days': return 30;
-      case '90days': return 90;
-    }
-  };
-
-  const filteredData = allData.slice(-getDaysCount(selectedRange));
+  const displayData = useMemo(() => processDatabaseData(selectedRange), [selectedRange, dbData]);
 
   const getDayStatus = (day: DayData): RoutineStatus => {
     if (!day.morning && !day.night) return 'skipped';
@@ -122,30 +160,53 @@ export default function DailyRoutineHistory() {
     }
   };
 
-  const completedDays = filteredData.filter(d => getDayStatus(d) === 'completed').length;
-  const completionRate = Math.round((completedDays / filteredData.length) * 100);
-  const breakoutReduction = Math.max(15, Math.min(45, completionRate / 2 + Math.random() * 10));
+  const completedDays = displayData.filter(d => getDayStatus(d) === 'completed').length;
+  const completionRate = displayData.length > 0 
+    ? Math.round((completedDays / displayData.length) * 100) 
+    : 0;
+  
+  const calculateStreak = () => {
+    let streak = 0;
+    const reversedData = [...displayData].reverse();
+    for (const day of reversedData) {
+      if (getDayStatus(day) === 'completed') {
+        streak++;
+      } else {
+        if (getDayStatus(day) === 'skipped') break;
+        if (getDayStatus(day) === 'partial') break;
+      }
+    }
+    return streak;
+  };
+
+  const currentStreak = calculateStreak();
+  const breakoutReduction = Math.max(0, Math.round(completionRate / 2.2));
 
   const getFilteredDays = () => {
     switch (selectedFilter) {
-      case 'morning': return filteredData.filter(d => d.morning);
-      case 'night': return filteredData.filter(d => d.night);
-      case 'missed': return filteredData.filter(d => getDayStatus(d) === 'skipped');
-      default: return filteredData;
+      case 'morning': return displayData.filter(d => d.morning);
+      case 'night': return displayData.filter(d => d.night);
+      case 'missed': return displayData.filter(d => getDayStatus(d) === 'skipped');
+      default: return displayData;
     }
   };
 
-  const displayData = selectedFilter === 'all' ? filteredData : getFilteredDays();
+  const finalGridData = selectedFilter === 'all' ? displayData : getFilteredDays();
 
   const createCalendarGrid = () => {
+    if (displayData.length === 0) return [];
+    
     const grid: (DayData | null)[] = [];
-    const firstDay = new Date(filteredData[0].date);
-    const dayOfWeek = firstDay.getDay(); // 0 = Sunday
+    const firstDayStr = displayData[0].date;
+    const [y, m, d] = firstDayStr.split('-').map(Number);
+    const firstDay = new Date(y, m - 1, d); 
+    
+    const dayOfWeek = firstDay.getDay();
     
     for (let i = 0; i < dayOfWeek; i++) {
       grid.push(null);
     }
-    grid.push(...filteredData);
+    grid.push(...displayData);
     return grid;
   };
 
@@ -165,8 +226,16 @@ export default function DailyRoutineHistory() {
     { value: 'missed', label: 'Missed', emoji: '⚠️' },
   ];
 
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
       
       {/* Header */}
@@ -186,7 +255,7 @@ export default function DailyRoutineHistory() {
         contentContainerStyle={styles.scrollContent} 
         showsVerticalScrollIndicator={false}
       >
-        {/* Time Range Selector (Tags) */}
+        {/* Time Range Selector */}
         <Animated.View entering={FadeInDown.delay(100)}>
             <ScrollView 
                 horizontal 
@@ -233,17 +302,19 @@ export default function DailyRoutineHistory() {
                 </View>
                 <View>
                     <Text style={styles.heroTitle}>Impact Analysis</Text>
-                    <Text style={styles.heroStatLabel}>AI Insights</Text>
+                    <Text style={styles.heroStatLabel}>Based on {selectedRange} data</Text>
                 </View>
             </View>
             
             <Text style={styles.heroMainText}>
-                Breakouts were <Text style={{ fontWeight: '900', color: '#FFF' }}>{breakoutReduction.toFixed(0)}% less frequent</Text> on days with full routine completion.
+                Projected <Text style={{ fontWeight: '900', color: '#FFF' }}>{breakoutReduction}% improvement</Text> in skin clarity based on your consistency.
             </Text>
             
             <View style={styles.miniInsight}>
                 <Text style={styles.miniInsightText}>
-                    💡 Missed night routines correlate with higher acne counts.
+                   {completionRate > 80 
+                     ? "💡 Excellent consistency! Keep this rhythm going." 
+                     : "💡 Consistency is key. Try to hit both AM and PM routines."}
                 </Text>
             </View>
           </View>
@@ -304,15 +375,16 @@ export default function DailyRoutineHistory() {
 
                 {/* The Grid */}
                 <View style={styles.grid}>
-                    {(selectedFilter === 'all' ? calendarGrid : displayData).map((day, index) => {
+                    {(selectedFilter === 'all' ? calendarGrid : finalGridData).map((day, index) => {
                     if (!day && selectedFilter === 'all') {
                         return <View key={`empty-${index}`} style={{ width: CELL_SIZE, height: CELL_SIZE }} />;
                     }
                     if (!day) return null;
 
                     const status = getDayStatus(day);
-                    const dateObj = new Date(day.date);
-                    const dayNum = dateObj.getDate();
+                    
+                    const [y, m, d] = day.date.split('-');
+                    const dayNum = parseInt(d);
 
                     return (
                         <TouchableOpacity
@@ -345,7 +417,6 @@ export default function DailyRoutineHistory() {
             icon={<CheckCircle2 color={STATUS_COLORS.success} size={20} />}
             label="Completed" 
             value={completedDays.toString()} 
-            // Using direct hexes for background accents to be safe
             bgColor="#ECFDF5" 
             textColor={STATUS_COLORS.success}
             styles={styles}
@@ -361,7 +432,7 @@ export default function DailyRoutineHistory() {
           <StatCard 
             icon={<Zap color={STATUS_COLORS.warning} size={20} />}
             label="Streak" 
-            value={`${Math.floor(Math.random() * 8) + 3}`} 
+            value={currentStreak.toString()} 
             bgColor="#FFFBEB"
             textColor={STATUS_COLORS.warning}
             styles={styles}
@@ -393,9 +464,13 @@ export default function DailyRoutineHistory() {
                    getDayStatus(selectedDay) === 'partial' ? '⚡' : '💭'}
                 </Text>
                 <Text style={styles.modalTitle}>
-                  {new Date(selectedDay.date).toLocaleDateString('en-US', { 
-                    weekday: 'long', month: 'long', day: 'numeric' 
-                  })}
+                   {(() => {
+                      const [y, m, d] = selectedDay.date.split('-');
+                      const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                      return dateObj.toLocaleDateString('en-US', { 
+                        weekday: 'long', month: 'long', day: 'numeric' 
+                      });
+                   })()}
                 </Text>
                 <Text style={styles.modalSubtitle}>
                   {getDayStatus(selectedDay).replace('nodata', 'no data')} routine
@@ -440,7 +515,7 @@ export default function DailyRoutineHistory() {
           </View>
         )}
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -477,9 +552,9 @@ const getStyles = (colors: ThemeColors, isDarkMode: boolean) => StyleSheet.creat
   container: { 
     flex: 1, 
     backgroundColor: colors.background,
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 50,
   },
   
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -493,7 +568,7 @@ const getStyles = (colors: ThemeColors, isDarkMode: boolean) => StyleSheet.creat
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: colors.primary + '15', // Opacity on primary
+    backgroundColor: colors.primary + '15', 
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -507,7 +582,6 @@ const getStyles = (colors: ThemeColors, isDarkMode: boolean) => StyleSheet.creat
   
   scrollContent: { padding: 20, paddingBottom: 60 },
 
-  // Tags/Chips
   tagContainer: { 
     flexDirection: 'row', 
     gap: 10,
@@ -526,7 +600,6 @@ const getStyles = (colors: ThemeColors, isDarkMode: boolean) => StyleSheet.creat
     letterSpacing: 0.5,
   },
 
-  // Hero Card
   heroCard: {
     borderRadius: 28,
     marginBottom: 32,
@@ -586,7 +659,6 @@ const getStyles = (colors: ThemeColors, isDarkMode: boolean) => StyleSheet.creat
     marginBottom: 4,
   },
 
-  // Sections
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -607,7 +679,6 @@ const getStyles = (colors: ThemeColors, isDarkMode: boolean) => StyleSheet.creat
     color: colors.text,
   },
 
-  // Cards (General)
   card: {
     backgroundColor: colors.card,
     borderRadius: 24,
@@ -639,7 +710,6 @@ const getStyles = (colors: ThemeColors, isDarkMode: boolean) => StyleSheet.creat
     color: colors.text, 
   },
 
-  // Grid
   gridHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -682,7 +752,6 @@ const getStyles = (colors: ThemeColors, isDarkMode: boolean) => StyleSheet.creat
     borderWidth: 2,
   },
 
-  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
